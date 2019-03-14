@@ -167,9 +167,13 @@ class Main
   def transfer_bam_files(bam_list, folder)
     output_folder_path = "#{@output_path + folder}/"
     Net::SCP.start(@iontorrent_ip, @iontorrent_user, password: ENV['ION_PASS']) do |scp|
+      transfer_count = 0
+      bam_list_count = bam_list.length
       bam_list.each do |bam|
         download_path = "#{@results_path + folder}/#{bam}"
         scp.download!(download_path, output_folder_path)
+        transfer_count += 1
+        p "Transferred bam file #{transfer_count}/#{bam_list_count}."
       end
     end
   end
