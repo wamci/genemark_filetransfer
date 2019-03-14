@@ -124,7 +124,7 @@ class Main
       transfer_json_file folder_name
       @log.debug("Auto: bam and json files updated in #{folder_name}")
       @log.debug("Auto: processing json file for #{folder_name}")
-      process_json_file get_json_file_path(folder_name), folder_name
+      process_json_file "#{@output_path + folder_name}/startplugin.json", folder_name
       @log.debug("Auto: retrieving animal data for #{folder_name}")
       update_animals_from_animal_db folder_name
       @log.debug("Auto: creating csv for #{@output_path + folder_name}")
@@ -148,7 +148,7 @@ class Main
     bam_list
   end
 
-  def get_json_file_path(folder)
+  def get_json_file_remote_path(folder)
     ssh = Net::SSH.start(@iontorrent_ip, @iontorrent_user)
     plugin_folder_file_list = ssh.exec!("cd #{@results_path + folder}/plugin_out && ls").split("\n")
     ssh.close()
@@ -180,7 +180,7 @@ class Main
 
   def transfer_json_file(folder)
     output_folder_path = "#{@output_path + folder}/"
-    json_download_path = get_json_file_path folder
+    json_download_path = get_json_file_remote_path folder
     Net::SCP.download!(@iontorrent_ip, @iontorrent_user, json_download_path, output_folder_path, ssh: { password: ENV['ION_PASS'] })
   end
 
