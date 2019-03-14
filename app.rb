@@ -24,7 +24,7 @@ class Main
     @iontorrent_ip = ENV['ION_IP']
     @iontorrent_user = ENV['ION_USER']
     @results_path = ENV['RESULTS_PATH']
-    @output_path = ENV['OUTPUT_PATH']
+    @output_path = ENV['OUTPUT_PATH'] + '/'
     @processing_logs = ProcessingLog.new
     @animal_results = AnimalResult.new
     @oracle_db = OracleDatabase.new
