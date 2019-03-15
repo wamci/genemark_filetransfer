@@ -3,12 +3,13 @@ require 'optparse'
 require 'require_all'
 require 'net/ssh'
 require 'net/scp'
-require 'dotenv/load'
+require 'dotenv'
 require 'fileutils'
 require 'json'
 require 'csv'
 require 'logger'
 
+Dotenv.load('~/.env')
 DB = Sequel.connect(ENV['DB_CONNECTION_STRING'])
 require_all 'lib'
 
@@ -88,9 +89,11 @@ class Main
             @log.debug("Manual: retrieving animal data for #{manual_folder_name}")
             update_animals_from_animal_db manual_folder_name
             @log.debug("Manual: creating csv for #{@output_path + manual_folder_name}")
-            export_csv @output_path, manual_folder_name
+            csv_path = export_csv @output_path, manual_folder_name
             @log.debug("Manual: csv successfully created for #{manual_folder_name}. Job complete")
             folderObj.mark_as_complete
+            execute_slurm_command csv_path
+            p "Processing complete for #{manual_folder_name}"
           else
             @log.error("Manual: unable to retrieve folder object from database for #{manual_folder_name}")
           end
@@ -129,9 +132,11 @@ class Main
       @log.debug("Auto: retrieving animal data for #{folder_name}")
       update_animals_from_animal_db folder_name
       @log.debug("Auto: creating csv for #{@output_path + folder_name}")
-      export_csv @output_path, folder_name
+      csv_path = export_csv @output_path, folder_name
       @log.debug("Auto: csv successfully created for #{folder_name}. Job complete")
       @processing_logs.mark_as_complete
+      execute_slurm_command csv_path
+      p "Processing complete for #{folder_name}"
     end
   end
 
@@ -167,7 +172,7 @@ class Main
 
   def transfer_bam_files(bam_list, folder)
     output_folder_path = "#{@output_path + folder}/"
-    Net::SCP.start(@iontorrent_ip, @iontorrent_user, password: ENV['ION_PASS']) do |scp|
+    Net::SCP.start(@iontorrent_ip, @iontorrent_user) do |scp|
       transfer_count = 0
       bam_list_count = bam_list.length
       bam_list.each do |bam|
@@ -182,7 +187,7 @@ class Main
   def transfer_json_file(folder)
     output_folder_path = "#{@output_path + folder}/"
     json_download_path = get_json_file_remote_path folder
-    Net::SCP.download!(@iontorrent_ip, @iontorrent_user, json_download_path, output_folder_path, ssh: { password: ENV['ION_PASS'] })
+    Net::SCP.download!(@iontorrent_ip, @iontorrent_user, json_download_path, output_folder_path)
   end
 
   def process_json_file(json_file_path, folder)
@@ -220,8 +225,14 @@ class Main
         csv << hash.values
       end
     end
+    csv_path
+  end
+
+  def execute_slurm_command(csv_path)
+    %x[sbatch --array=1-384 /home/rnd/apps/scripts/auto.map.bams.sh #{csv_path}]
   end
 
 end
 
 Main.new.run
+
