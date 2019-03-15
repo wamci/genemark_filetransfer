@@ -67,7 +67,8 @@ class Main
         if bam_count < 384
           @log.debug("Manual: bam count less than 384\nManual: removing contents from #{manual_folder}/.")
           FileUtils.rm_rf("#{manual_folder}/.", secure: true)
-          transfer_bam_files get_bam_list(manual_folder_name), manual_folder_name
+          updated_bam_list = filter_bam_only get_bam_list(manual_folder_name)
+          transfer_bam_files updated_bam_list, manual_folder_name
           transfer_json_file manual_folder_name
           @log.debug("Manual: bam and json files updated in #{manual_folder}")
         end
