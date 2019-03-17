@@ -134,7 +134,7 @@ class Main
       @log.debug("Auto: creating csv for #{@output_path + folder_name}")
       csv_path = export_csv @output_path, folder_name
       @log.debug("Auto: csv successfully created for #{folder_name}. Job complete")
-      @processing_logs.mark_as_complete
+      folderObj.mark_as_complete
       execute_slurm_command csv_path
       p "Processing complete for #{folder_name}"
     end
