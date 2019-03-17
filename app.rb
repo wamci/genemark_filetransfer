@@ -11,7 +11,7 @@ require 'logger'
 
 Dotenv.load('~/.env')
 DB = Sequel.connect(ENV['DB_CONNECTION_STRING'])
-require_all 'lib'
+require_all ENV['LIB_PATH']
 
 class Main
   
