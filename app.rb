@@ -111,7 +111,7 @@ class Main
     if next_unprocessed
       next_unprocessed.mark_as_processing
       process_folder next_unprocessed
-      # check_next_unprocessed
+      check_next_unprocessed
     end
   end
 
