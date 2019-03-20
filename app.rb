@@ -196,12 +196,14 @@ class Main
       json_file[:plan][:barcodedSamples].each do |sample|
         animal = { aliquot_id: nil, aliquot_id_alt: nil, full_path: '', folder_name: '', bam_file_name: '' }
         aliquot_ids = sample[0].to_s.split('_')
-        animal[:aliquot_id] = aliquot_ids[0]
-        animal[:aliquot_id_alt] = aliquot_ids[1]
-        animal[:bam_file_name] = sample[1][:barcodeSampleInfo].keys[0].to_s
-        animal[:full_path] = "#{@output_path + folder}/"
-        animal[:folder_name] = folder
-        @animal_results.add_animal_result animal
+        if is_number?(aliquot_ids[0]) && is_number?(aliquot_ids[1])
+          animal[:aliquot_id] = aliquot_ids[0]
+          animal[:aliquot_id_alt] = aliquot_ids[1]
+          animal[:bam_file_name] = sample[1][:barcodeSampleInfo].keys[0].to_s
+          animal[:full_path] = "#{@output_path + folder}/"
+          animal[:folder_name] = folder
+          @animal_results.add_animal_result animal
+        end
       end
     else
       @log.error("Problem with JSON file for #{folder}")
@@ -230,6 +232,10 @@ class Main
 
   def execute_slurm_command(csv_path)
     %x[sbatch --array=1-384 /home/rnd/apps/scripts/auto.map.bams.sh #{csv_path}]
+  end
+
+  def is_number?(text)
+    true if Integer(text) rescue false
   end
 
 end
