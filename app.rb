@@ -3,14 +3,15 @@ require 'optparse'
 require 'require_all'
 require 'net/ssh'
 require 'net/scp'
-require 'dotenv/load'
+require 'dotenv'
 require 'fileutils'
 require 'json'
 require 'csv'
 require 'logger'
 
+Dotenv.load('~/.env')
 DB = Sequel.connect(ENV['DB_CONNECTION_STRING'])
-require_all 'lib'
+require_all ENV['LIB_PATH']
 
 class Main
   
@@ -24,7 +25,7 @@ class Main
     @iontorrent_ip = ENV['ION_IP']
     @iontorrent_user = ENV['ION_USER']
     @results_path = ENV['RESULTS_PATH']
-    @output_path = ENV['OUTPUT_PATH']
+    @output_path = ENV['OUTPUT_PATH'] + '/'
     @processing_logs = ProcessingLog.new
     @animal_results = AnimalResult.new
     @oracle_db = OracleDatabase.new
@@ -67,7 +68,8 @@ class Main
         if bam_count < 384
           @log.debug("Manual: bam count less than 384\nManual: removing contents from #{manual_folder}/.")
           FileUtils.rm_rf("#{manual_folder}/.", secure: true)
-          transfer_bam_files get_bam_list(manual_folder_name), manual_folder_name
+          updated_bam_list = filter_bam_only get_bam_list(manual_folder_name)
+          transfer_bam_files updated_bam_list, manual_folder_name
           transfer_json_file manual_folder_name
           @log.debug("Manual: bam and json files updated in #{manual_folder}")
         end
@@ -87,9 +89,11 @@ class Main
             @log.debug("Manual: retrieving animal data for #{manual_folder_name}")
             update_animals_from_animal_db manual_folder_name
             @log.debug("Manual: creating csv for #{@output_path + manual_folder_name}")
-            export_csv @output_path, manual_folder_name
+            csv_path = export_csv @output_path, manual_folder_name
             @log.debug("Manual: csv successfully created for #{manual_folder_name}. Job complete")
             folderObj.mark_as_complete
+            execute_slurm_command csv_path
+            p "Processing complete for #{manual_folder_name}"
           else
             @log.error("Manual: unable to retrieve folder object from database for #{manual_folder_name}")
           end
@@ -107,7 +111,7 @@ class Main
     if next_unprocessed
       next_unprocessed.mark_as_processing
       process_folder next_unprocessed
-      # check_next_unprocessed
+      check_next_unprocessed
     end
   end
 
@@ -124,13 +128,15 @@ class Main
       transfer_json_file folder_name
       @log.debug("Auto: bam and json files updated in #{folder_name}")
       @log.debug("Auto: processing json file for #{folder_name}")
-      process_json_file get_json_file_path(folder_name), folder_name
+      process_json_file "#{@output_path + folder_name}/startplugin.json", folder_name
       @log.debug("Auto: retrieving animal data for #{folder_name}")
       update_animals_from_animal_db folder_name
       @log.debug("Auto: creating csv for #{@output_path + folder_name}")
-      export_csv @output_path, folder_name
+      csv_path = export_csv @output_path, folder_name
       @log.debug("Auto: csv successfully created for #{folder_name}. Job complete")
-      @processing_logs.mark_as_complete
+      folderObj.mark_as_complete
+      execute_slurm_command csv_path
+      p "Processing complete for #{folder_name}"
     end
   end
 
@@ -148,7 +154,7 @@ class Main
     bam_list
   end
 
-  def get_json_file_path(folder)
+  def get_json_file_remote_path(folder)
     ssh = Net::SSH.start(@iontorrent_ip, @iontorrent_user)
     plugin_folder_file_list = ssh.exec!("cd #{@results_path + folder}/plugin_out && ls").split("\n")
     ssh.close()
@@ -166,18 +172,22 @@ class Main
 
   def transfer_bam_files(bam_list, folder)
     output_folder_path = "#{@output_path + folder}/"
-    Net::SCP.start(@iontorrent_ip, @iontorrent_user, password: ENV['ION_PASS']) do |scp|
+    Net::SCP.start(@iontorrent_ip, @iontorrent_user) do |scp|
+      transfer_count = 0
+      bam_list_count = bam_list.length
       bam_list.each do |bam|
         download_path = "#{@results_path + folder}/#{bam}"
         scp.download!(download_path, output_folder_path)
+        transfer_count += 1
+        p "Transferred bam file #{transfer_count}/#{bam_list_count}."
       end
     end
   end
 
   def transfer_json_file(folder)
     output_folder_path = "#{@output_path + folder}/"
-    json_download_path = get_json_file_path folder
-    Net::SCP.download!(@iontorrent_ip, @iontorrent_user, json_download_path, output_folder_path, ssh: { password: ENV['ION_PASS'] })
+    json_download_path = get_json_file_remote_path folder
+    Net::SCP.download!(@iontorrent_ip, @iontorrent_user, json_download_path, output_folder_path)
   end
 
   def process_json_file(json_file_path, folder)
@@ -186,12 +196,14 @@ class Main
       json_file[:plan][:barcodedSamples].each do |sample|
         animal = { aliquot_id: nil, aliquot_id_alt: nil, full_path: '', folder_name: '', bam_file_name: '' }
         aliquot_ids = sample[0].to_s.split('_')
-        animal[:aliquot_id] = aliquot_ids[0]
-        animal[:aliquot_id_alt] = aliquot_ids[1]
-        animal[:bam_file_name] = sample[1][:barcodeSampleInfo].keys[0].to_s
-        animal[:full_path] = "#{@output_path + folder}/"
-        animal[:folder_name] = folder
-        @animal_results.add_animal_result animal
+        if is_number?(aliquot_ids[0]) && is_number?(aliquot_ids[1])
+          animal[:aliquot_id] = aliquot_ids[0]
+          animal[:aliquot_id_alt] = aliquot_ids[1]
+          animal[:bam_file_name] = sample[1][:barcodeSampleInfo].keys[0].to_s
+          animal[:full_path] = "#{@output_path + folder}/"
+          animal[:folder_name] = folder
+          @animal_results.add_animal_result animal
+        end
       end
     else
       @log.error("Problem with JSON file for #{folder}")
@@ -215,8 +227,18 @@ class Main
         csv << hash.values
       end
     end
+    csv_path
+  end
+
+  def execute_slurm_command(csv_path)
+    %x[sbatch --array=1-384 /home/rnd/apps/scripts/auto.map.bams.sh #{csv_path}]
+  end
+
+  def is_number?(text)
+    true if Integer(text) rescue false
   end
 
 end
 
 Main.new.run
+
